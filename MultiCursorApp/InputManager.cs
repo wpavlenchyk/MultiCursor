@@ -283,25 +283,35 @@ namespace MultiCursorApp
 
             if ((buttonFlags & Native.RI_MOUSE_LEFT_BUTTON_DOWN) != 0)
             {
-                PerformSecondaryClick(isDown: true);
+                PerformSecondaryClick(Native.MOUSEEVENTF_LEFTDOWN, isDown: true);
                 SecondaryMouseClicked?.Invoke(true);
             }
             if ((buttonFlags & Native.RI_MOUSE_LEFT_BUTTON_UP) != 0)
             {
-                PerformSecondaryClick(isDown: false);
+                PerformSecondaryClick(Native.MOUSEEVENTF_LEFTUP, isDown: false);
+                SecondaryMouseClicked?.Invoke(false);
+            }
+            if ((buttonFlags & Native.RI_MOUSE_RIGHT_BUTTON_DOWN) != 0)
+            {
+                PerformSecondaryClick(Native.MOUSEEVENTF_RIGHTDOWN, isDown: true);
+                SecondaryMouseClicked?.Invoke(true); // Visual feedback
+            }
+            if ((buttonFlags & Native.RI_MOUSE_RIGHT_BUTTON_UP) != 0)
+            {
+                PerformSecondaryClick(Native.MOUSEEVENTF_RIGHTUP, isDown: false);
                 SecondaryMouseClicked?.Invoke(false);
             }
         }
 
-        private void PerformSecondaryClick(bool isDown)
+        private void PerformSecondaryClick(uint injectFlag, bool isDown)
         {
             if (CurrentClickMode == ClickMode.Teleport)
-                PerformTeleportClick(isDown);
+                PerformTeleportClick(injectFlag, isDown);
             else
-                PerformSendMessageClick(isDown);
+                PerformSendMessageClick(injectFlag, isDown);
         }
 
-        private async void PerformTeleportClick(bool isDown)
+        private async void PerformTeleportClick(uint injectFlag, bool isDown)
         {
             if (isDown)
             {
@@ -313,14 +323,14 @@ namespace MultiCursorApp
 
                 _isSecondaryDragging = true;
                 Native.SetCursorPos(_secondaryCursorX, _secondaryCursorY);
-                InjectMouseButton(Native.MOUSEEVENTF_LEFTDOWN);
+                InjectMouseButton(injectFlag);
                 // We DO NOT return to primary here. The cursor stays at secondary to allow dragging
                 // and to prevent selection boxes drawn to the primary cursor.
             }
             else
             {
                 Native.SetCursorPos(_secondaryCursorX, _secondaryCursorY);
-                InjectMouseButton(Native.MOUSEEVENTF_LEFTUP);
+                InjectMouseButton(injectFlag);
                 
                 _isSecondaryDragging = false;
                 _isTeleporting = true; // Protect primary movement during the delay
@@ -347,7 +357,7 @@ namespace MultiCursorApp
             }
         }
 
-        private void PerformSendMessageClick(bool isDown)
+        private void PerformSendMessageClick(uint injectFlag, bool isDown)
         {
             var pt = new Native.POINT { x = _secondaryCursorX, y = _secondaryCursorY };
             IntPtr targetHwnd = Native.WindowFromPoint(pt);
@@ -356,7 +366,15 @@ namespace MultiCursorApp
             {
                 Native.ScreenToClient(targetHwnd, ref pt);
                 IntPtr lParam = (IntPtr)((pt.y << 16) | (pt.x & 0xFFFF));
-                uint msg = isDown ? (uint)Native.WM_LBUTTONDOWN : (uint)Native.WM_LBUTTONUP;
+                
+                uint msg = 0;
+                if (injectFlag == Native.MOUSEEVENTF_LEFTDOWN) msg = (uint)Native.WM_LBUTTONDOWN;
+                else if (injectFlag == Native.MOUSEEVENTF_LEFTUP) msg = (uint)Native.WM_LBUTTONUP;
+                else if (injectFlag == Native.MOUSEEVENTF_RIGHTDOWN) msg = (uint)Native.WM_RBUTTONDOWN;
+                else if (injectFlag == Native.MOUSEEVENTF_RIGHTUP) msg = (uint)Native.WM_RBUTTONUP;
+                
+                if (msg == 0) return;
+
                 IntPtr wParam = (IntPtr)(isDown ? 1 : 0);
                 Native.SendMessage(targetHwnd, msg, wParam, lParam);
             }

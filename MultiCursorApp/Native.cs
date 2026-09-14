@@ -162,6 +162,8 @@ namespace MultiCursorApp
         
         public const int WM_LBUTTONDOWN = 0x0201;
         public const int WM_LBUTTONUP = 0x0202;
+        public const int WM_RBUTTONDOWN = 0x0204;
+        public const int WM_RBUTTONUP = 0x0205;
         
         // Window styles for overlay
         public const int WS_EX_TRANSPARENT = 0x00000020;
