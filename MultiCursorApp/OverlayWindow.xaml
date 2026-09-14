@@ -1,0 +1,23 @@
+<Window x:Class="MultiCursorApp.OverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OverlayWindow" 
+        Background="Transparent"
+        AllowsTransparency="True"
+        WindowStyle="None"
+        Topmost="True"
+        ShowInTaskbar="False">
+    <Canvas Name="MainCanvas" Background="Transparent">
+        <!-- The secondary cursor -->
+        <Path Name="CursorPath" Fill="Red" Stroke="White" StrokeThickness="1" 
+              Data="M 0,0 L 0,17 L 4,13 L 7,20 L 9,19 L 6,12 L 12,12 Z">
+            <Path.RenderTransform>
+                <TranslateTransform x:Name="CursorTransform" X="0" Y="0" />
+            </Path.RenderTransform>
+            <!-- Add a drop shadow for better visibility -->
+            <Path.Effect>
+                <DropShadowEffect Color="Black" BlurRadius="2" ShadowDepth="1" Opacity="0.5" />
+            </Path.Effect>
+        </Path>
+    </Canvas>
+</Window>

@@ -1,0 +1,66 @@
+<Window x:Class="MultiCursorApp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Multi-Cursor Manager" Height="400" Width="500">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Multi-Cursor Manager" FontSize="20" FontWeight="Bold" Margin="0,0,0,10" Grid.Row="0"/>
+
+        <!-- Device Assignment -->
+        <GroupBox Header="Mice Assignment" Grid.Row="1" Margin="0,0,0,10" Padding="5">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,5">
+                    <TextBlock Text="Primary Mouse: " FontWeight="Bold" Width="120" VerticalAlignment="Center"/>
+                    <ComboBox Name="PrimaryMouseCombo" Width="300" SelectionChanged="PrimaryMouseCombo_SelectionChanged"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,5">
+                    <TextBlock Text="Secondary Mouse: " FontWeight="Bold" Width="120" VerticalAlignment="Center"/>
+                    <ComboBox Name="SecondaryMouseCombo" Width="300" SelectionChanged="SecondaryMouseCombo_SelectionChanged"/>
+                </StackPanel>
+                
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <Button Name="RefreshMiceBtn" Content="Refresh Devices" Width="120" Margin="0,0,10,0" Click="RefreshMiceBtn_Click"/>
+                    <Button Name="SwitchMiceBtn" Content="Switch Mice" Width="100" Click="SwitchMiceBtn_Click"/>
+                </StackPanel>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- Settings -->
+        <GroupBox Header="Settings" Grid.Row="2" Margin="0,0,0,10" Padding="5">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,5">
+                    <TextBlock Text="Cursor Color:" VerticalAlignment="Center" Width="120"/>
+                    <ComboBox Name="ColorComboBox" Width="100" SelectionChanged="ColorComboBox_SelectionChanged">
+                        <ComboBoxItem Content="Red" IsSelected="True"/>
+                        <ComboBoxItem Content="Blue"/>
+                        <ComboBoxItem Content="Green"/>
+                        <ComboBoxItem Content="Yellow"/>
+                        <ComboBoxItem Content="Purple"/>
+                    </ComboBox>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,5">
+                    <TextBlock Text="Click Mode:" VerticalAlignment="Center" Width="120"/>
+                    <ComboBox Name="ClickModeComboBox" Width="200" SelectionChanged="ClickModeComboBox_SelectionChanged">
+                        <ComboBoxItem Content="Teleport (Reliable)" IsSelected="True"/>
+                        <ComboBoxItem Content="SendMessage (Safe, less reliable)"/>
+                    </ComboBox>
+                </StackPanel>
+                <TextBlock Name="ModeDescriptionLabel" TextWrapping="Wrap" Margin="0,5,0,0" FontStyle="Italic" Foreground="Gray"/>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- Main Toggle -->
+        <Button Name="ToggleBtn" Content="Enable Multi-Cursor" Grid.Row="3" Height="40" FontSize="16" FontWeight="Bold" Background="LightGreen" Click="ToggleBtn_Click"/>
+
+    </Grid>
+</Window>
