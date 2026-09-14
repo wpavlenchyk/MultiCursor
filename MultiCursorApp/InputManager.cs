@@ -225,8 +225,18 @@ namespace MultiCursorApp
             Native.SendInput(1, new[] { input }, Marshal.SizeOf(typeof(Native.INPUT)));
         }
 
+        private bool _isSecondaryDragging = false;
+        private bool _isTeleporting = false; // Kept for the Up delay
+
         private void HandlePrimaryMouse(int dx, int dy, ushort buttonFlags, short wheelDelta)
         {
+            if (_isSecondaryDragging || _isTeleporting)
+            {
+                // Do not inject relative movements or primary clicks while secondary is interacting
+                // to avoid moving the cursor from the wrong starting position.
+                return;
+            }
+
             // Re-inject movement
             if (dx != 0 || dy != 0)
             {
@@ -263,6 +273,12 @@ namespace MultiCursorApp
                 _secondaryCursorX = Math.Clamp(_secondaryCursorX, _screenLeft, _screenRight);
                 _secondaryCursorY = Math.Clamp(_secondaryCursorY, _screenTop, _screenBottom);
                 SecondaryMouseMoved?.Invoke(_secondaryCursorX, _secondaryCursorY);
+
+                if (_isSecondaryDragging && CurrentClickMode == ClickMode.Teleport)
+                {
+                    // Move the actual system cursor to follow the drag
+                    Native.SetCursorPos(_secondaryCursorX, _secondaryCursorY);
+                }
             }
 
             if ((buttonFlags & Native.RI_MOUSE_LEFT_BUTTON_DOWN) != 0)
@@ -285,29 +301,49 @@ namespace MultiCursorApp
                 PerformSendMessageClick(isDown);
         }
 
-        private void PerformTeleportClick(bool isDown)
+        private async void PerformTeleportClick(bool isDown)
         {
             if (isDown)
             {
-                // Save primary cursor position
-                Native.GetCursorPos(out var saved);
-                _savedCursorPos = saved;
+                if (!_savedCursorPos.HasValue)
+                {
+                    Native.GetCursorPos(out var saved);
+                    _savedCursorPos = saved;
+                }
 
-                // Teleport, click down, teleport back
+                _isSecondaryDragging = true;
                 Native.SetCursorPos(_secondaryCursorX, _secondaryCursorY);
                 InjectMouseButton(Native.MOUSEEVENTF_LEFTDOWN);
-                Native.SetCursorPos(saved.x, saved.y);
+                // We DO NOT return to primary here. The cursor stays at secondary to allow dragging
+                // and to prevent selection boxes drawn to the primary cursor.
             }
             else
             {
-                // Get current primary pos (may have moved since button-down)
-                Native.GetCursorPos(out var currentPrimary);
-
-                // Teleport, release, teleport back
                 Native.SetCursorPos(_secondaryCursorX, _secondaryCursorY);
                 InjectMouseButton(Native.MOUSEEVENTF_LEFTUP);
-                Native.SetCursorPos(currentPrimary.x, currentPrimary.y);
-                _savedCursorPos = null;
+                
+                _isSecondaryDragging = false;
+                _isTeleporting = true; // Protect primary movement during the delay
+
+                try
+                {
+                    if (_savedCursorPos.HasValue)
+                    {
+                        // Wait for the input queue to process the release at the secondary position
+                        await System.Threading.Tasks.Task.Delay(15);
+                        
+                        // Check if another down-click happened during the delay
+                        if (!_isSecondaryDragging && _savedCursorPos.HasValue)
+                        {
+                            Native.SetCursorPos(_savedCursorPos.Value.x, _savedCursorPos.Value.y);
+                            _savedCursorPos = null;
+                        }
+                    }
+                }
+                finally
+                {
+                    _isTeleporting = false;
+                }
             }
         }
 
