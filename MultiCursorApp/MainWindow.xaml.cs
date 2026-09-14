@@ -29,6 +29,49 @@ namespace MultiCursorApp
             RefreshDeviceLists();
         }
 
+        // --- Custom Title Bar Handlers ---
+        private bool _isDragging = false;
+        private Point _dragStartPoint;
+
+        private void TitleBar_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == System.Windows.Input.MouseButton.Left)
+            {
+                _isDragging = true;
+                _dragStartPoint = e.GetPosition(this);
+                CustomTitleBar.CaptureMouse();
+            }
+        }
+
+        private void TitleBar_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            if (_isDragging && e.LeftButton == System.Windows.Input.MouseButtonState.Pressed)
+            {
+                Point currentPoint = e.GetPosition(this);
+                this.Left += currentPoint.X - _dragStartPoint.X;
+                this.Top += currentPoint.Y - _dragStartPoint.Y;
+            }
+        }
+
+        private void TitleBar_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (_isDragging)
+            {
+                _isDragging = false;
+                CustomTitleBar.ReleaseMouseCapture();
+            }
+        }
+
+        private void MinimizeButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.WindowState = WindowState.Minimized;
+        }
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
+        }
+
         private void MainWindow_Closed(object? sender, EventArgs e)
         {
             _inputManager?.Dispose();
