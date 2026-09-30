@@ -245,6 +245,9 @@ namespace MultiCursorApp
 
         private void HandlePrimaryMouse(int dx, int dy, ushort buttonFlags, short wheelDelta)
         {
+            if (_isLeftDown || _isRightDown)
+                return;
+
             // Re-inject movement
             if (dx != 0 || dy != 0)
                 InjectMouseMove(dx, dy);
@@ -272,6 +275,9 @@ namespace MultiCursorApp
 
         // --- Secondary mouse: track position + SendMessage for clicks ---
 
+        private bool _isLeftDown = false;
+        private bool _isRightDown = false;
+
         private void HandleSecondaryMouse(int dx, int dy, ushort buttonFlags, short wheelDelta)
         {
             if (dx != 0 || dy != 0)
@@ -281,16 +287,24 @@ namespace MultiCursorApp
                 _secondaryCursorX = Math.Clamp(_secondaryCursorX, _screenLeft, _screenRight);
                 _secondaryCursorY = Math.Clamp(_secondaryCursorY, _screenTop, _screenBottom);
                 SecondaryMouseMoved?.Invoke(_secondaryCursorX, _secondaryCursorY);
+
+                // Send WM_MOUSEMOVE for frame-by-frame drawing
+                int wParamMove = 0;
+                if (_isLeftDown) wParamMove |= 0x0001;
+                if (_isRightDown) wParamMove |= 0x0002;
+                PerformSendMessageClick(Native.WM_MOUSEMOVE, wParamMove);
             }
 
             // Left click
             if ((buttonFlags & Native.RI_MOUSE_LEFT_BUTTON_DOWN) != 0)
             {
+                _isLeftDown = true;
                 PerformSendMessageClick(Native.WM_LBUTTONDOWN, 0x0001); // MK_LBUTTON
                 SecondaryMouseClicked?.Invoke(true);
             }
             if ((buttonFlags & Native.RI_MOUSE_LEFT_BUTTON_UP) != 0)
             {
+                _isLeftDown = false;
                 PerformSendMessageClick(Native.WM_LBUTTONUP, 0);
                 SecondaryMouseClicked?.Invoke(false);
             }
@@ -298,11 +312,13 @@ namespace MultiCursorApp
             // Right click
             if ((buttonFlags & Native.RI_MOUSE_RIGHT_BUTTON_DOWN) != 0)
             {
+                _isRightDown = true;
                 PerformSendMessageClick(Native.WM_RBUTTONDOWN, 0x0002); // MK_RBUTTON
                 SecondaryMouseClicked?.Invoke(true);
             }
             if ((buttonFlags & Native.RI_MOUSE_RIGHT_BUTTON_UP) != 0)
             {
+                _isRightDown = false;
                 PerformSendMessageClick(Native.WM_RBUTTONUP, 0);
                 SecondaryMouseClicked?.Invoke(false);
             }
