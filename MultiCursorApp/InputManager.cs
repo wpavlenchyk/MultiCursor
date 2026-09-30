@@ -245,9 +245,6 @@ namespace MultiCursorApp
 
         private void HandlePrimaryMouse(int dx, int dy, ushort buttonFlags, short wheelDelta)
         {
-            if (_isLeftDown || _isRightDown)
-                return;
-
             // Re-inject movement
             if (dx != 0 || dy != 0)
                 InjectMouseMove(dx, dy);
