@@ -174,12 +174,8 @@ namespace MultiCursorApp
 
         private void OnSecondaryMouseMoved(int screenX, int screenY)
         {
-            // Update overlay cursor rendering on UI thread
-            // Using BeginInvoke (async) for better performance — no blocking
-            Dispatcher.BeginInvoke(() =>
-            {
-                _overlayWindow?.SetCursorScreenPosition(screenX, screenY);
-            });
+            // Just update target variables, rendering happens on CompositionTarget.Rendering
+            _overlayWindow?.SetCursorScreenPosition(screenX, screenY);
         }
     }
 }

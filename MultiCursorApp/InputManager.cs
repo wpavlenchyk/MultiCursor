@@ -14,8 +14,30 @@ namespace MultiCursorApp
         private const uint MAGIC_EXTRA_INFO_U32 = 0x4D435552;
 
         public bool IsEnabled { get; set; } = false;
-        public string PrimaryMouseHandle { get; set; } = "";
-        public string SecondaryMouseHandle { get; set; } = "";
+        
+        private string _primaryMouseString = "";
+        private IntPtr _primaryMouseHandle = IntPtr.Zero;
+        public string PrimaryMouseHandle 
+        { 
+            get => _primaryMouseString; 
+            set 
+            { 
+                _primaryMouseString = value; 
+                _primaryMouseHandle = (IntPtr)(long.TryParse(value, out long val) ? val : 0); 
+            } 
+        }
+
+        private string _secondaryMouseString = "";
+        private IntPtr _secondaryMouseHandle = IntPtr.Zero;
+        public string SecondaryMouseHandle 
+        { 
+            get => _secondaryMouseString; 
+            set 
+            { 
+                _secondaryMouseString = value; 
+                _secondaryMouseHandle = (IntPtr)(long.TryParse(value, out long val) ? val : 0); 
+            } 
+        }
 
         // Secondary cursor position tracked in PHYSICAL SCREEN PIXELS
         private int _secondaryCursorX;
@@ -97,9 +119,12 @@ namespace MultiCursorApp
         {
             if (nCode >= 0 && IsEnabled)
             {
-                var hookStruct = Marshal.PtrToStructure<Native.MSLLHOOKSTRUCT>(lParam);
+                // Optimize: read dwExtraInfo directly instead of allocating a struct (which causes GC pressure).
+                // Offset is 24 on 64-bit, 20 on 32-bit.
+                int offset = IntPtr.Size == 8 ? 24 : 20;
+                IntPtr extraInfo = Marshal.ReadIntPtr(lParam, offset);
 
-                if (hookStruct.dwExtraInfo == MAGIC_EXTRA_INFO)
+                if (extraInfo == MAGIC_EXTRA_INFO)
                 {
                     // This is OUR injected event — let it through
                     return Native.CallNextHookEx(_hookID, nCode, wParam, lParam);
@@ -120,12 +145,12 @@ namespace MultiCursorApp
             return IntPtr.Zero;
         }
 
-        private void ProcessRawInput(IntPtr lParam)
+        private unsafe void ProcessRawInput(IntPtr lParam)
         {
             if (!IsEnabled) return;
 
             uint dwSize = 0;
-            uint headerSize = (uint)Marshal.SizeOf(typeof(Native.RAWINPUTHEADER));
+            uint headerSize = (uint)sizeof(Native.RAWINPUTHEADER);
             Native.GetRawInputData(lParam, Native.RID_INPUT, IntPtr.Zero, ref dwSize, headerSize);
 
             if (dwSize == 0) return;
@@ -137,38 +162,31 @@ namespace MultiCursorApp
                 if (bytesCopied <= 0)
                     return;
 
-                var header = Marshal.PtrToStructure<Native.RAWINPUTHEADER>(buffer);
+                Native.RAWINPUTHEADER* header = (Native.RAWINPUTHEADER*)buffer;
 
-                if (header.dwType != Native.RIM_TYPEMOUSE)
+                if (header->dwType != Native.RIM_TYPEMOUSE)
                     return;
 
-                int hdrSize = Marshal.SizeOf(typeof(Native.RAWINPUTHEADER));
-                var mouse = Marshal.PtrToStructure<Native.RAWMOUSE>(
-                    new IntPtr(buffer.ToInt64() + hdrSize));
+                Native.RAWMOUSE* mouse = (Native.RAWMOUSE*)((byte*)buffer + headerSize);
 
                 // CRITICAL: Skip our own re-injected events!
-                // When we call SendInput, it generates a WM_INPUT with our magic marker
-                // in ulExtraInformation. If we process it again, we get an infinite loop.
-                if (mouse.ulExtraInformation == MAGIC_EXTRA_INFO_U32)
+                if (mouse->ulExtraInformation == MAGIC_EXTRA_INFO_U32)
                     return;
 
-                string hDeviceStr = header.hDevice.ToString();
-                int dx = mouse.lLastX;
-                int dy = mouse.lLastY;
-                ushort buttonFlags = mouse.usButtonFlags;
-                short wheelDelta = (short)mouse.usButtonData;
+                IntPtr hDevice = header->hDevice;
+                int dx = mouse->lLastX;
+                int dy = mouse->lLastY;
+                ushort buttonFlags = mouse->usButtonFlags;
+                short wheelDelta = (short)mouse->usButtonData;
 
-                if (hDeviceStr == SecondaryMouseHandle)
+                if (hDevice == _secondaryMouseHandle)
                 {
-                    HandleSecondaryMouse(dx, dy, buttonFlags);
+                    HandleSecondaryMouse(dx, dy, buttonFlags, wheelDelta);
                 }
-                else if (hDeviceStr == PrimaryMouseHandle)
+                else if (hDevice == _primaryMouseHandle)
                 {
                     HandlePrimaryMouse(dx, dy, buttonFlags, wheelDelta);
                 }
-                // Events from unknown devices are intentionally ignored.
-                // The hook already blocked them. This is by design — only
-                // the two explicitly assigned mice are processed.
             }
             finally
             {
@@ -254,10 +272,7 @@ namespace MultiCursorApp
 
         // --- Secondary mouse: track position + SendMessage for clicks ---
 
-        private bool _isLeftDown = false;
-        private bool _isRightDown = false;
-
-        private void HandleSecondaryMouse(int dx, int dy, ushort buttonFlags)
+        private void HandleSecondaryMouse(int dx, int dy, ushort buttonFlags, short wheelDelta)
         {
             if (dx != 0 || dy != 0)
             {
@@ -266,24 +281,16 @@ namespace MultiCursorApp
                 _secondaryCursorX = Math.Clamp(_secondaryCursorX, _screenLeft, _screenRight);
                 _secondaryCursorY = Math.Clamp(_secondaryCursorY, _screenTop, _screenBottom);
                 SecondaryMouseMoved?.Invoke(_secondaryCursorX, _secondaryCursorY);
-
-                // Send WM_MOUSEMOVE so apps can track drawing while dragging
-                int wParam = 0;
-                if (_isLeftDown) wParam |= 0x0001; // MK_LBUTTON
-                if (_isRightDown) wParam |= 0x0002; // MK_RBUTTON
-                PerformSendMessageClick(Native.WM_MOUSEMOVE, wParam);
             }
 
             // Left click
             if ((buttonFlags & Native.RI_MOUSE_LEFT_BUTTON_DOWN) != 0)
             {
-                _isLeftDown = true;
                 PerformSendMessageClick(Native.WM_LBUTTONDOWN, 0x0001); // MK_LBUTTON
                 SecondaryMouseClicked?.Invoke(true);
             }
             if ((buttonFlags & Native.RI_MOUSE_LEFT_BUTTON_UP) != 0)
             {
-                _isLeftDown = false;
                 PerformSendMessageClick(Native.WM_LBUTTONUP, 0);
                 SecondaryMouseClicked?.Invoke(false);
             }
@@ -291,16 +298,20 @@ namespace MultiCursorApp
             // Right click
             if ((buttonFlags & Native.RI_MOUSE_RIGHT_BUTTON_DOWN) != 0)
             {
-                _isRightDown = true;
                 PerformSendMessageClick(Native.WM_RBUTTONDOWN, 0x0002); // MK_RBUTTON
                 SecondaryMouseClicked?.Invoke(true);
             }
             if ((buttonFlags & Native.RI_MOUSE_RIGHT_BUTTON_UP) != 0)
             {
-                _isRightDown = false;
                 PerformSendMessageClick(Native.WM_RBUTTONUP, 0);
                 SecondaryMouseClicked?.Invoke(false);
             }
+
+            // Scroll wheel
+            if ((buttonFlags & Native.RI_MOUSE_WHEEL) != 0)
+                PerformSendMessageScroll(Native.WM_MOUSEWHEEL, wheelDelta);
+            if ((buttonFlags & Native.RI_MOUSE_HWHEEL) != 0)
+                PerformSendMessageScroll(Native.WM_MOUSEHWHEEL, wheelDelta);
         }
 
         private void PerformSendMessageClick(int wmMsg, int wParamValue)
@@ -313,6 +324,27 @@ namespace MultiCursorApp
                 Native.ScreenToClient(targetHwnd, ref pt);
                 IntPtr lParam = (IntPtr)((pt.y << 16) | (pt.x & 0xFFFF));
                 Native.SendMessage(targetHwnd, (uint)wmMsg, (IntPtr)wParamValue, lParam);
+            }
+        }
+
+        private void PerformSendMessageScroll(int wmMsg, short delta)
+        {
+            var pt = new Native.POINT { x = _secondaryCursorX, y = _secondaryCursorY };
+            IntPtr targetHwnd = Native.WindowFromPoint(pt);
+
+            if (targetHwnd != IntPtr.Zero)
+            {
+                // Note: WM_MOUSEWHEEL expects screen coordinates in lParam!
+                // Fixed negative coordinate bitwise packing for multi-monitor setups
+                int lParamInt = ((pt.y & 0xFFFF) << 16) | (pt.x & 0xFFFF);
+                IntPtr lParam = (IntPtr)lParamInt;
+                
+                // wParam: High word is delta, low word is keys (0)
+                int wParamInt = ((int)delta << 16) & unchecked((int)0xFFFF0000);
+                IntPtr wParam = (IntPtr)wParamInt;
+                
+                // PostMessage is preferred for input events to avoid blocking
+                Native.PostMessage(targetHwnd, (uint)wmMsg, wParam, lParam);
             }
         }
 

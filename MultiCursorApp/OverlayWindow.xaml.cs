@@ -50,7 +50,12 @@ namespace MultiCursorApp
             // Initialize cursor at center
             SetCursorScreenPosition(_physScreenLeft + _physScreenWidth / 2, 
                                      _physScreenTop + _physScreenHeight / 2);
+
+            CompositionTarget.Rendering += OnRendering;
         }
+
+        private double _targetCanvasX = 0;
+        private double _targetCanvasY = 0;
 
         /// <summary>
         /// Set the secondary cursor position using physical screen pixel coordinates.
@@ -59,12 +64,18 @@ namespace MultiCursorApp
         public void SetCursorScreenPosition(int screenX, int screenY)
         {
             // Convert physical screen pixels to WPF DIP canvas coordinates
-            // Canvas coords = (screenPixel - screenOrigin) / dpiScale
-            double canvasX = (screenX - _physScreenLeft) / _dpiScaleX;
-            double canvasY = (screenY - _physScreenTop) / _dpiScaleY;
+            _targetCanvasX = (screenX - _physScreenLeft) / _dpiScaleX;
+            _targetCanvasY = (screenY - _physScreenTop) / _dpiScaleY;
+        }
 
-            CursorTransform.X = canvasX;
-            CursorTransform.Y = canvasY;
+        private void OnRendering(object? sender, EventArgs e)
+        {
+            // Update UI at monitor refresh rate instead of 1000Hz mouse polling rate
+            if (CursorTransform.X != _targetCanvasX || CursorTransform.Y != _targetCanvasY)
+            {
+                CursorTransform.X = _targetCanvasX;
+                CursorTransform.Y = _targetCanvasY;
+            }
         }
 
         public void SetCursorColor(Color color)
