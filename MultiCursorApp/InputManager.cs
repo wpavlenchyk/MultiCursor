@@ -10,16 +10,12 @@ namespace MultiCursorApp
     public class InputManager : IDisposable
     {
         // Magic signature to identify OUR injected events in the LL hook.
-        // The hook will ONLY pass through events tagged with this value.
-        // Everything else (physical events, events from other apps) gets blocked.
         private static readonly IntPtr MAGIC_EXTRA_INFO = (IntPtr)0x4D435552; // "MCUR"
+        private const uint MAGIC_EXTRA_INFO_U32 = 0x4D435552;
 
         public bool IsEnabled { get; set; } = false;
         public string PrimaryMouseHandle { get; set; } = "";
         public string SecondaryMouseHandle { get; set; } = "";
-        
-        public enum ClickMode { Teleport, SendMessage }
-        public ClickMode CurrentClickMode { get; set; } = ClickMode.Teleport;
 
         // Secondary cursor position tracked in PHYSICAL SCREEN PIXELS
         private int _secondaryCursorX;
@@ -36,7 +32,6 @@ namespace MultiCursorApp
         private Native.LowLevelMouseProc _proc;
         private IntPtr _hookID = IntPtr.Zero;
         private HwndSource _hwndSource;
-        private Native.POINT? _savedCursorPos = null;
 
         public InputManager(Window window)
         {
@@ -75,7 +70,7 @@ namespace MultiCursorApp
             var rid = new Native.RAWINPUTDEVICE[1];
             rid[0].usUsagePage = 0x01;
             rid[0].usUsage = 0x02;
-            rid[0].dwFlags = Native.RIDEV_INPUTSINK; // Receive input even when not focused
+            rid[0].dwFlags = Native.RIDEV_INPUTSINK;
             rid[0].hwndTarget = hwnd;
 
             if (!Native.RegisterRawInputDevices(rid, (uint)rid.Length, (uint)Marshal.SizeOf(rid[0])))
@@ -89,22 +84,19 @@ namespace MultiCursorApp
             using (Process curProcess = Process.GetCurrentProcess())
             using (ProcessModule? curModule = curProcess.MainModule)
             {
-                return Native.SetWindowsHookEx(Native.WH_MOUSE_LL, proc, 
+                return Native.SetWindowsHookEx(Native.WH_MOUSE_LL, proc,
                     Native.GetModuleHandle(curModule!.ModuleName!), 0);
             }
         }
 
         /// <summary>
-        /// LL Hook callback. Must be FAST (< 200ms) or Windows will remove it.
+        /// LL Hook callback. Blocks all physical mouse events when enabled.
         /// Only lets through events tagged with our MAGIC_EXTRA_INFO.
-        /// Blocks everything else (physical events from all mice).
         /// </summary>
         private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
             if (nCode >= 0 && IsEnabled)
             {
-                // Read dwExtraInfo directly from the struct at a known offset to be fast.
-                // MSLLHOOKSTRUCT: pt(8) + mouseData(4) + flags(4) + time(4) = offset 20 for dwExtraInfo
                 var hookStruct = Marshal.PtrToStructure<Native.MSLLHOOKSTRUCT>(lParam);
 
                 if (hookStruct.dwExtraInfo == MAGIC_EXTRA_INFO)
@@ -146,29 +138,37 @@ namespace MultiCursorApp
                     return;
 
                 var header = Marshal.PtrToStructure<Native.RAWINPUTHEADER>(buffer);
-                
+
                 if (header.dwType != Native.RIM_TYPEMOUSE)
                     return;
-
-                string hDeviceStr = header.hDevice.ToString();
 
                 int hdrSize = Marshal.SizeOf(typeof(Native.RAWINPUTHEADER));
                 var mouse = Marshal.PtrToStructure<Native.RAWMOUSE>(
                     new IntPtr(buffer.ToInt64() + hdrSize));
 
+                // CRITICAL: Skip our own re-injected events!
+                // When we call SendInput, it generates a WM_INPUT with our magic marker
+                // in ulExtraInformation. If we process it again, we get an infinite loop.
+                if (mouse.ulExtraInformation == MAGIC_EXTRA_INFO_U32)
+                    return;
+
+                string hDeviceStr = header.hDevice.ToString();
                 int dx = mouse.lLastX;
                 int dy = mouse.lLastY;
                 ushort buttonFlags = mouse.usButtonFlags;
                 short wheelDelta = (short)mouse.usButtonData;
 
-                if (hDeviceStr == PrimaryMouseHandle)
-                {
-                    HandlePrimaryMouse(dx, dy, buttonFlags, wheelDelta);
-                }
-                else if (hDeviceStr == SecondaryMouseHandle)
+                if (hDeviceStr == SecondaryMouseHandle)
                 {
                     HandleSecondaryMouse(dx, dy, buttonFlags);
                 }
+                else if (hDeviceStr == PrimaryMouseHandle)
+                {
+                    HandlePrimaryMouse(dx, dy, buttonFlags, wheelDelta);
+                }
+                // Events from unknown devices are intentionally ignored.
+                // The hook already blocked them. This is by design — only
+                // the two explicitly assigned mice are processed.
             }
             finally
             {
@@ -176,7 +176,7 @@ namespace MultiCursorApp
             }
         }
 
-        // --- Injection helper: all our injected events are tagged with MAGIC_EXTRA_INFO ---
+        // --- Injection helpers: all tagged with MAGIC_EXTRA_INFO ---
 
         private void InjectMouseMove(int dx, int dy)
         {
@@ -215,8 +215,6 @@ namespace MultiCursorApp
                 type = Native.INPUT_MOUSE,
                 mi = new Native.MOUSEINPUT
                 {
-                    // Sign-extend the 16-bit short to a 32-bit int before casting to uint
-                    // This ensures negative scroll values remain negative (e.g., 0xFFFFFF88 instead of 0x0000FF88)
                     mouseData = (uint)(int)delta,
                     dwFlags = flags,
                     dwExtraInfo = MAGIC_EXTRA_INFO
@@ -225,24 +223,14 @@ namespace MultiCursorApp
             Native.SendInput(1, new[] { input }, Marshal.SizeOf(typeof(Native.INPUT)));
         }
 
-        private bool _isSecondaryDragging = false;
-        private bool _isTeleporting = false; // Kept for the Up delay
+        // --- Primary mouse: re-inject everything so it works normally ---
 
         private void HandlePrimaryMouse(int dx, int dy, ushort buttonFlags, short wheelDelta)
         {
-            if (_isSecondaryDragging || _isTeleporting)
-            {
-                // Do not inject relative movements or primary clicks while secondary is interacting
-                // to avoid moving the cursor from the wrong starting position.
-                return;
-            }
-
             // Re-inject movement
             if (dx != 0 || dy != 0)
-            {
                 InjectMouseMove(dx, dy);
-            }
-            
+
             // Re-inject button events
             if ((buttonFlags & Native.RI_MOUSE_LEFT_BUTTON_DOWN) != 0)
                 InjectMouseButton(Native.MOUSEEVENTF_LEFTDOWN);
@@ -264,6 +252,11 @@ namespace MultiCursorApp
                 InjectMouseWheel(Native.MOUSEEVENTF_HWHEEL, wheelDelta);
         }
 
+        // --- Secondary mouse: track position + SendMessage for clicks ---
+
+        private bool _isLeftDown = false;
+        private bool _isRightDown = false;
+
         private void HandleSecondaryMouse(int dx, int dy, ushort buttonFlags)
         {
             if (dx != 0 || dy != 0)
@@ -274,90 +267,43 @@ namespace MultiCursorApp
                 _secondaryCursorY = Math.Clamp(_secondaryCursorY, _screenTop, _screenBottom);
                 SecondaryMouseMoved?.Invoke(_secondaryCursorX, _secondaryCursorY);
 
-                if (_isSecondaryDragging && CurrentClickMode == ClickMode.Teleport)
-                {
-                    // Move the actual system cursor to follow the drag
-                    Native.SetCursorPos(_secondaryCursorX, _secondaryCursorY);
-                }
+                // Send WM_MOUSEMOVE so apps can track drawing while dragging
+                int wParam = 0;
+                if (_isLeftDown) wParam |= 0x0001; // MK_LBUTTON
+                if (_isRightDown) wParam |= 0x0002; // MK_RBUTTON
+                PerformSendMessageClick(Native.WM_MOUSEMOVE, wParam);
             }
 
+            // Left click
             if ((buttonFlags & Native.RI_MOUSE_LEFT_BUTTON_DOWN) != 0)
             {
-                PerformSecondaryClick(Native.MOUSEEVENTF_LEFTDOWN, isDown: true);
+                _isLeftDown = true;
+                PerformSendMessageClick(Native.WM_LBUTTONDOWN, 0x0001); // MK_LBUTTON
                 SecondaryMouseClicked?.Invoke(true);
             }
             if ((buttonFlags & Native.RI_MOUSE_LEFT_BUTTON_UP) != 0)
             {
-                PerformSecondaryClick(Native.MOUSEEVENTF_LEFTUP, isDown: false);
+                _isLeftDown = false;
+                PerformSendMessageClick(Native.WM_LBUTTONUP, 0);
                 SecondaryMouseClicked?.Invoke(false);
             }
+
+            // Right click
             if ((buttonFlags & Native.RI_MOUSE_RIGHT_BUTTON_DOWN) != 0)
             {
-                PerformSecondaryClick(Native.MOUSEEVENTF_RIGHTDOWN, isDown: true);
-                SecondaryMouseClicked?.Invoke(true); // Visual feedback
+                _isRightDown = true;
+                PerformSendMessageClick(Native.WM_RBUTTONDOWN, 0x0002); // MK_RBUTTON
+                SecondaryMouseClicked?.Invoke(true);
             }
             if ((buttonFlags & Native.RI_MOUSE_RIGHT_BUTTON_UP) != 0)
             {
-                PerformSecondaryClick(Native.MOUSEEVENTF_RIGHTUP, isDown: false);
+                _isRightDown = false;
+                PerformSendMessageClick(Native.WM_RBUTTONUP, 0);
                 SecondaryMouseClicked?.Invoke(false);
             }
         }
 
-        private void PerformSecondaryClick(uint injectFlag, bool isDown)
-        {
-            if (CurrentClickMode == ClickMode.Teleport)
-                PerformTeleportClick(injectFlag, isDown);
-            else
-                PerformSendMessageClick(injectFlag, isDown);
-        }
-
-        private async void PerformTeleportClick(uint injectFlag, bool isDown)
-        {
-            if (isDown)
-            {
-                if (!_savedCursorPos.HasValue)
-                {
-                    Native.GetCursorPos(out var saved);
-                    _savedCursorPos = saved;
-                }
-
-                _isSecondaryDragging = true;
-                Native.SetCursorPos(_secondaryCursorX, _secondaryCursorY);
-                InjectMouseButton(injectFlag);
-                // We DO NOT return to primary here. The cursor stays at secondary to allow dragging
-                // and to prevent selection boxes drawn to the primary cursor.
-            }
-            else
-            {
-                Native.SetCursorPos(_secondaryCursorX, _secondaryCursorY);
-                InjectMouseButton(injectFlag);
-                
-                _isSecondaryDragging = false;
-                _isTeleporting = true; // Protect primary movement during the delay
-
-                try
-                {
-                    if (_savedCursorPos.HasValue)
-                    {
-                        // Wait for the input queue to process the release at the secondary position
-                        await System.Threading.Tasks.Task.Delay(15);
-                        
-                        // Check if another down-click happened during the delay
-                        if (!_isSecondaryDragging && _savedCursorPos.HasValue)
-                        {
-                            Native.SetCursorPos(_savedCursorPos.Value.x, _savedCursorPos.Value.y);
-                            _savedCursorPos = null;
-                        }
-                    }
-                }
-                finally
-                {
-                    _isTeleporting = false;
-                }
-            }
-        }
-
-        private void PerformSendMessageClick(uint injectFlag, bool isDown)
+        private void PerformSendMessageClick(int wmMsg, int wParamValue)
         {
             var pt = new Native.POINT { x = _secondaryCursorX, y = _secondaryCursorY };
             IntPtr targetHwnd = Native.WindowFromPoint(pt);
@@ -366,17 +312,7 @@ namespace MultiCursorApp
             {
                 Native.ScreenToClient(targetHwnd, ref pt);
                 IntPtr lParam = (IntPtr)((pt.y << 16) | (pt.x & 0xFFFF));
-                
-                uint msg = 0;
-                if (injectFlag == Native.MOUSEEVENTF_LEFTDOWN) msg = (uint)Native.WM_LBUTTONDOWN;
-                else if (injectFlag == Native.MOUSEEVENTF_LEFTUP) msg = (uint)Native.WM_LBUTTONUP;
-                else if (injectFlag == Native.MOUSEEVENTF_RIGHTDOWN) msg = (uint)Native.WM_RBUTTONDOWN;
-                else if (injectFlag == Native.MOUSEEVENTF_RIGHTUP) msg = (uint)Native.WM_RBUTTONUP;
-                
-                if (msg == 0) return;
-
-                IntPtr wParam = (IntPtr)(isDown ? 1 : 0);
-                Native.SendMessage(targetHwnd, msg, wParam, lParam);
+                Native.SendMessage(targetHwnd, (uint)wmMsg, (IntPtr)wParamValue, lParam);
             }
         }
 

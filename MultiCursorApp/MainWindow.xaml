@@ -62,15 +62,6 @@
                                 <ComboBoxItem Content="Purple"/>
                             </ComboBox>
                         </StackPanel>
-
-                        <StackPanel Orientation="Horizontal" Margin="0,5">
-                            <TextBlock Text="Click Mode:" VerticalAlignment="Center" Width="120"/>
-                            <ComboBox Name="ClickModeComboBox" Width="200" SelectionChanged="ClickModeComboBox_SelectionChanged">
-                                <ComboBoxItem Content="Teleport (Reliable)" IsSelected="True"/>
-                                <ComboBoxItem Content="SendMessage (Safe, less reliable)"/>
-                            </ComboBox>
-                        </StackPanel>
-                        <TextBlock Name="ModeDescriptionLabel" TextWrapping="Wrap" Margin="0,5,0,0" FontStyle="Italic" Foreground="Gray"/>
                     </StackPanel>
                 </GroupBox>
 

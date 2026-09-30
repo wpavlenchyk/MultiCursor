@@ -25,7 +25,6 @@ namespace MultiCursorApp
             _overlayWindow = new OverlayWindow();
             _overlayWindow.Show();
             
-            UpdateModeDescription();
             RefreshDeviceLists();
         }
 
@@ -172,30 +171,6 @@ namespace MultiCursorApp
             _overlayWindow.SetCursorColor(color);
         }
 
-        private void ClickModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_inputManager == null) return;
-            string? mode = (ClickModeComboBox.SelectedItem as ComboBoxItem)?.Content.ToString();
-            if (mode != null && mode.StartsWith("Teleport"))
-                _inputManager.CurrentClickMode = InputManager.ClickMode.Teleport;
-            else
-                _inputManager.CurrentClickMode = InputManager.ClickMode.SendMessage;
-
-            UpdateModeDescription();
-        }
-
-        private void UpdateModeDescription()
-        {
-            if (ModeDescriptionLabel == null || _inputManager == null) return;
-            if (_inputManager.CurrentClickMode == InputManager.ClickMode.Teleport)
-            {
-                ModeDescriptionLabel.Text = "Teleport: Instantly moves the primary cursor to the secondary position, clicks, and moves back. Very reliable, works everywhere.";
-            }
-            else
-            {
-                ModeDescriptionLabel.Text = "SendMessage: Sends a click message directly to the window under the secondary cursor. Primary cursor does not move. May not work in all apps/games.";
-            }
-        }
 
         private void OnSecondaryMouseMoved(int screenX, int screenY)
         {
