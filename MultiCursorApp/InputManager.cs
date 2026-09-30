@@ -335,7 +335,8 @@ namespace MultiCursorApp
             if (targetHwnd != IntPtr.Zero)
             {
                 Native.ScreenToClient(targetHwnd, ref pt);
-                IntPtr lParam = (IntPtr)((pt.y << 16) | (pt.x & 0xFFFF));
+                int lParamInt = ((pt.y & 0xFFFF) << 16) | (pt.x & 0xFFFF);
+                IntPtr lParam = (IntPtr)lParamInt;
                 Native.SendMessage(targetHwnd, (uint)wmMsg, (IntPtr)wParamValue, lParam);
             }
         }
